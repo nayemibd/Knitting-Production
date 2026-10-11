@@ -1,0 +1,1 @@
+SELECT PROD_DATE,PROD_COMPANY,bulk_production,sample_production,subcon_prod_qty,sales_prod_qty,total_production,total_rejection,reject_percent,avg_production_per_machine FROM view_knitting_production_report WHERE prod_date > TO_DATE('01-01-2018', 'DD-MM-YYYY')
