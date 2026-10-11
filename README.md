@@ -38,3 +38,42 @@ Knitting-Production/
 ├── Images/
 │   └── dashboard.png
 └── README.md
+
+Key Performance Indicators (KPIs)
+The dashboard can be used to monitor important production KPIs such as:
+- Total Production
+- Daily Production
+- Monthly Production
+- Production Target
+- Production Achievement
+- Production Efficiency
+- Machine Performance
+- Company-wise Production
+- Order-wise Production
+🎯 Project Objectives
+The main objectives of this project are:
+1. Centralize knitting production information.
+2. Reduce manual reporting.
+3. Improve production data visibility.
+4. Create interactive management dashboards.
+5. Monitor production performance.
+6. Identify production trends and variations.
+7. Support data-driven decision making.
+📁 Files
+Data Set
+Contains the datasets used for Power BI reporting and analysis.
+SQL Query
+Contains SQL queries used to retrieve and prepare production information.
+Power BI
+Contains the Power BI report/dashboard developed from the production dataset.
+🚀 How to Use
+1. Prepare the Data
+Load the production dataset into the appropriate database or data source.
+2. Run SQL Queries
+Execute the SQL queries provided in the SQL Query folder to retrieve the required production information.
+3. Open Power BI
+Open the Power BI report and configure the data source if required.
+4. Refresh the Dataset
+Refresh the Power BI dataset to load the latest production information.
+5. Analyze the Dashboard
+Use the available filters and visualizations to analyze production performance.
