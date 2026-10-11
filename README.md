@@ -26,12 +26,10 @@ The dashboard can be used to monitor important production KPIs such as:
 - Total Production
 - Daily Production
 - Monthly Production
-- Production Target
 - Production Achievement
 - Production Efficiency
 - Machine Performance
 - Company-wise Production
-- Order-wise Production
   
 **🎯 Project Objectives**
 The main objectives of this project are:
