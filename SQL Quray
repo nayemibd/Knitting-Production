@@ -1,217 +1,135 @@
-WITH receive_data AS (
-    SELECT 
-        batch_id,
-        SUM(
-            CASE 
-                WHEN TRANSLATE(TO_CHAR(receive_qnty), '0123456789.', ' ') IS NULL
-                THEN receive_qnty
-                ELSE 0
-            END
-        ) AS receive_qnty,
-        SUM(
-            CASE 
-                WHEN TRANSLATE(TO_CHAR(grey_used_qty), '0123456789.', ' ') IS NULL
-                THEN grey_used_qty
-                ELSE 0
-            END
-        ) AS grey_qnty
-    FROM pro_finish_fabric_rcv_dtls 
-    WHERE status_active = 1
-      AND batch_status  = 1
-    GROUP BY batch_id
-),
-batch_details AS (
+WITH subcon_data AS (
     SELECT
-        mst_id,
-        SUM(batch_qnty) AS batch_qnty,
-        MAX(TRIM(REGEXP_SUBSTR(item_description, '[^,]+', 1, 1))) AS fabric_type,
-        MAX(TRIM(REGEXP_SUBSTR(item_description, '[^,]+', 1, 3))) AS gsm
-    FROM pro_batch_create_dtls
-    WHERE status_active = 1
-      AND is_deleted    = 0
-    GROUP BY mst_id
-),
-last_process AS (
-    SELECT
-        batch_id,
-        process_id AS last_process_id,
-        process_end_date AS last_production_date
-    FROM (
-        SELECT
-            batch_id,
-            process_id,
-            process_end_date,
-            end_hours,
-            end_minutes,
-            ROW_NUMBER() OVER (
-                PARTITION BY batch_id
-                ORDER BY process_end_date DESC NULLS LAST,
-                         end_hours DESC NULLS LAST,
-                         end_minutes DESC NULLS LAST
-            ) rn
-        FROM pro_fab_subprocess
-        WHERE status_active = 1
-          AND is_deleted    = 0
-          AND load_unload_id != 2
-    )
-    WHERE rn = 1
+        a.product_date,
+        CASE WHEN a.knitting_company IN (1,2,4) THEN a.knitting_company ELSE 0 END AS company_group,
+        SUM(b.product_qnty) AS subcon_production_qty,
+        SUM(b.reject_qnty) AS subcon_reject_qty,
+        COUNT(DISTINCT b.machine_id) AS subcon_machine_count
+    FROM subcon_production_mst a
+    JOIN subcon_production_dtls b ON a.id = b.mst_id
+    WHERE a.product_type = 2
+      AND a.status_active = 1
+      AND a.knitting_source = 1
+      AND b.status_active = 1
+      AND b.product_type = 2
+      AND b.machine_id <> 0
+    GROUP BY
+        a.product_date,
+        CASE WHEN a.knitting_company IN (1,2,4) THEN a.knitting_company ELSE 0 END
 )
-
 SELECT
+    a.receive_date AS prod_date,
+    
+    CASE
+        WHEN a.knitting_company = 1 THEN 'METRO'
+        WHEN a.knitting_company = 2 THEN 'BEACON'
+        WHEN a.knitting_company = 4 THEN 'SCANDEX'
+        ELSE 'OutSide'
+    END AS prod_company,
+
+    COUNT(DISTINCT b.floor_id) AS floor_count,
+
+    SUM(CASE WHEN c.is_sales = 0 AND c.booking_without_order = 0
+             THEN NVL(c.qc_pass_qnty,0) ELSE 0 END) AS bulk_production,
+
+    SUM(CASE WHEN c.is_sales = 0 AND c.booking_without_order = 1
+             THEN NVL(c.qc_pass_qnty,0) ELSE 0 END) AS sample_production,
+
+    SUM(CASE WHEN c.is_sales = 0
+             THEN NVL(c.qc_pass_qnty,0) ELSE 0 END) AS prod_qnty_without_sales,
+
+    SUM(CASE WHEN c.is_sales = 1
+             THEN NVL(c.qc_pass_qnty,0) ELSE 0 END) AS sales_prod_qty,
+
+    NVL(sd.subcon_production_qty,0) AS subcon_prod_qty,
+
+    SUM(NVL(c.reject_qnty,0)) AS reject_qnty,
+    NVL(sd.subcon_reject_qty,0) AS subcon_reject_qty,
+
+    COUNT(DISTINCT CASE
+        WHEN c.is_sales = 0 AND NVL(c.qc_pass_qnty,0) > 0
+        THEN b.machine_no_id END) AS machine_count_without_sales,
+
+    COUNT(DISTINCT CASE
+        WHEN c.is_sales = 1 AND NVL(c.qc_pass_qnty,0) > 0
+        THEN b.machine_no_id END) AS machine_count_sales,
+
+    NVL(sd.subcon_machine_count,0) AS subcon_machine_count,
+
+    -- Total Production
+    NVL(SUM(CASE WHEN c.is_sales = 0 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+  + NVL(SUM(CASE WHEN c.is_sales = 1 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+  + NVL(sd.subcon_production_qty,0) AS total_production,
+
+    -- Total Rejection
+    SUM(NVL(c.reject_qnty,0)) + NVL(sd.subcon_reject_qty,0) AS total_rejection,
+
+    -- Total Machines
+    COUNT(DISTINCT CASE
+        WHEN c.is_sales = 0 AND NVL(c.qc_pass_qnty,0) > 0
+        THEN b.machine_no_id END)
+    + COUNT(DISTINCT CASE
+        WHEN c.is_sales = 1 AND NVL(c.qc_pass_qnty,0) > 0
+        THEN b.machine_no_id END)
+    + NVL(sd.subcon_machine_count,0) AS total_machine,
+
+    -- Reject Percent
     CASE 
-        WHEN b.COMPANY_ID = 1 THEN 'METRO' 
-        WHEN b.COMPANY_ID = 2 THEN 'BEA-CON'
-        WHEN b.COMPANY_ID = 4 THEN 'SCANDEX'
-        ELSE '' 
-    END AS PROD_COMPANY,
+        WHEN NVL(
+                NVL(SUM(CASE WHEN c.is_sales = 0 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+              + NVL(SUM(CASE WHEN c.is_sales = 1 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+              + NVL(sd.subcon_production_qty,0), 0) = 0 
+        THEN 0
+        ELSE 
+            (SUM(NVL(c.reject_qnty,0)) + NVL(sd.subcon_reject_qty,0)) / 
+            (NVL(SUM(CASE WHEN c.is_sales = 0 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+           + NVL(SUM(CASE WHEN c.is_sales = 1 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+           + NVL(sd.subcon_production_qty,0)) * 100
+    END AS reject_percent,
 
-    g.buyer_name AS BUYER_NAME,
-    d.company_name AS SERVICE_COMPANY,
-
-    TRUNC(a.process_end_date) AS UNLOAD_DATE,
-
+    -- Avg Production per Machine
     CASE 
-        WHEN REGEXP_LIKE(TO_CHAR(a.end_hours), '^\d+$')
-         AND REGEXP_LIKE(TO_CHAR(a.end_minutes), '^\d+$')
-        THEN TO_CHAR(a.end_hours) || ':' || LPAD(TO_CHAR(a.end_minutes), 2, '0')
-        ELSE NULL
-    END AS UNLOAD_TIME,
+        WHEN (COUNT(DISTINCT CASE WHEN c.is_sales = 0 AND NVL(c.qc_pass_qnty,0) > 0 THEN b.machine_no_id END)
+              + COUNT(DISTINCT CASE WHEN c.is_sales = 1 AND NVL(c.qc_pass_qnty,0) > 0 THEN b.machine_no_id END)
+              + NVL(sd.subcon_machine_count,0)) = 0 
+        THEN 0
+        ELSE
+            (NVL(SUM(CASE WHEN c.is_sales = 0 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+           + NVL(SUM(CASE WHEN c.is_sales = 1 THEN NVL(c.qc_pass_qnty,0) ELSE 0 END),0)
+           + NVL(sd.subcon_production_qty,0))
+            / (COUNT(DISTINCT CASE WHEN c.is_sales = 0 AND NVL(c.qc_pass_qnty,0) > 0 THEN b.machine_no_id END)
+             + COUNT(DISTINCT CASE WHEN c.is_sales = 1 AND NVL(c.qc_pass_qnty,0) > 0 THEN b.machine_no_id END)
+             + NVL(sd.subcon_machine_count,0))
+    END AS avg_production_per_machine
 
-    b.booking_no,
-    b.batch_no,
-    b.id AS batch_id,
-    b.extention_no,
-    b.batch_against,
+FROM inv_receive_master a
+JOIN pro_grey_prod_entry_dtls b ON a.id = b.mst_id
+LEFT JOIN pro_roll_details c
+       ON b.id = c.dtls_id
+      AND c.status_active = 1
+      AND c.is_deleted = 0
+LEFT JOIN subcon_data sd
+       ON sd.product_date = a.receive_date
+      AND sd.company_group = a.knitting_company
 
-    h.color_name AS COLOR,
-    c.fabric_type,
-    c.gsm,
-
-    s.last_process_id,
-    TRUNC(s.last_production_date) AS LAST_PRODUCTION_DATE,
-
-    c.batch_qnty AS BATCH_QTY,
-
-    /* Slitting - B_SLITTING_QTY */
-    CASE 
-        WHEN NVL(e.receive_qnty, 0) >= (c.batch_qnty * 0.7) THEN 0
-        WHEN NOT EXISTS (
-            SELECT 1 FROM pro_fab_subprocess x 
-            WHERE x.batch_id = b.id AND x.process_id = 65
-              AND x.status_active = 1 AND x.is_deleted = 0
-        )
-        AND NOT EXISTS (
-            SELECT 1 FROM pro_fab_subprocess x 
-            WHERE x.batch_id = b.id AND x.process_id = 63
-              AND x.status_active = 1 AND x.is_deleted = 0
-        )
-        THEN c.batch_qnty 
-        ELSE 0 
-    END AS B_SLITTING_QTY,
-
-    /* Slitting - A_SLITTING_QTY */
-    CASE 
-        WHEN NVL(e.receive_qnty, 0) >= (c.batch_qnty * 0.7) THEN 0
-        WHEN NOT EXISTS (
-            SELECT 1 FROM pro_fab_subprocess x 
-            WHERE x.batch_id = b.id AND x.process_id = 65
-              AND x.status_active = 1 AND x.is_deleted = 0
-        )
-        AND EXISTS (
-            SELECT 1 FROM pro_fab_subprocess x 
-            WHERE x.batch_id = b.id AND x.process_id = 63
-              AND x.status_active = 1 AND x.is_deleted = 0
-        )
-        THEN c.batch_qnty 
-        ELSE 0 
-    END AS A_SLITTING_QTY,
-
-    /* DRY_QTY */
-    CASE 
-        WHEN NVL(e.receive_qnty, 0) >= (c.batch_qnty * 0.7) THEN 0
-        WHEN NVL(e.grey_qnty, 0) >= (c.batch_qnty * 0.8)    THEN 0
-        WHEN EXISTS (
-            SELECT 1 FROM pro_fab_subprocess x 
-            WHERE x.batch_id = b.id AND x.process_id = 65
-              AND x.status_active = 1 AND x.is_deleted = 0
-        )
-        THEN (c.batch_qnty - NVL(e.grey_qnty, 0))
-        ELSE 0 
-    END AS DRY_QTY,
-
-    NVL(e.receive_qnty, 0) AS FINISH_QNTY,
-    NVL(e.grey_qnty, 0)    AS GREY_QNTY,
-
-    /* Result */
-    CASE 
-        WHEN a.result = '1' AND a.shade_matched = '1' THEN c.batch_qnty  
-        WHEN a.result = '4' THEN c.batch_qnty
-        ELSE 0 
-    END AS SHADE_MATCHED,
-
-    CASE WHEN a.result = '2' THEN c.batch_qnty ELSE 0 END AS RE_DYEING_NEEDED,
-    CASE WHEN a.result = '3' THEN c.batch_qnty ELSE 0 END AS FABRIC_DAMAGED,
-    CASE WHEN a.result = '4' THEN c.batch_qnty ELSE 0 END AS INCOMPLETE,
-    CASE WHEN a.result = '5' THEN c.batch_qnty ELSE 0 END AS UNDER_TRIAL,
-    CASE WHEN a.result = '6' THEN c.batch_qnty ELSE 0 END AS RE_WASH_NEEDED
-
-FROM pro_fab_subprocess a
-
-INNER JOIN pro_batch_create_mst b 
-    ON a.batch_id = b.id
-
-INNER JOIN batch_details c 
-    ON b.id = c.mst_id
-
-INNER JOIN lib_company d 
-    ON a.service_company = d.id
-
-INNER JOIN pro_recipe_entry_mst f 
-    ON a.batch_id = f.batch_id
-
-INNER JOIN lib_buyer g 
-    ON f.buyer_id = g.id
-
-LEFT JOIN receive_data e 
-    ON e.batch_id = a.batch_id
-
-LEFT JOIN lib_color h 
-    ON b.color_id = h.id
-
-LEFT JOIN last_process s 
-    ON a.batch_id = s.batch_id
-
-WHERE a.load_unload_id = 2
+WHERE a.entry_form = 2
+  AND a.item_category = 13
   AND a.status_active = 1
-  AND a.is_deleted = 0
   AND b.status_active = 1
-  AND b.is_deleted = 0
-  AND s.last_production_date >= TRUNC(SYSDATE) - 7
+  AND b.machine_no_id <> 0
+
 
 GROUP BY
-    b.COMPANY_ID,
-    g.buyer_name,
-    d.company_name,
-    TRUNC(a.process_end_date),
-    a.end_hours,
-    a.end_minutes,
-    s.last_process_id,
-    s.last_production_date,
-    b.booking_no,
-    b.batch_no,
-    b.extention_no,
-    h.color_name,
-    b.id,
-    b.batch_against,
-    c.fabric_type,
-    c.gsm,
-    c.batch_qnty,
-    a.result,
-    a.shade_matched,
-    e.grey_qnty,
-    e.receive_qnty
+    a.receive_date,
+    CASE
+        WHEN a.knitting_company = 1 THEN 'METRO'
+        WHEN a.knitting_company = 2 THEN 'BEACON'
+        WHEN a.knitting_company = 4 THEN 'SCANDEX'
+        ELSE 'OutSide'
+    END,
+    sd.subcon_production_qty,
+    sd.subcon_reject_qty,
+    sd.subcon_machine_count
 
 ORDER BY
-    d.company_name,
-    TRUNC(a.process_end_date),
-    b.batch_no;
+    a.receive_date;
