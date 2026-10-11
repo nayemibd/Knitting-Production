@@ -24,17 +24,17 @@ The project includes:
 
 ## 🗂️ Project Structure
 
+### Recommended GitHub structure
+
+I would also rename your folders/files to make the repository look more professional:
+
 ```text
 Knitting-Production/
 │
-├── ALL COMPANY KNITTING PRODUCTION.rsmob...
-│   └── Power BI report / report-related file
-│
-├── Data Set/
-│   └── Production datasets used for analysis
-│
-├── SQL Query/
-│   └── SQL queries used for data extraction and analysis
-│
+├── SQL-Query/
+├── Data-Set/
+├── Power-BI/
+│   └── All-Company-Knitting-Production.pbix
+├── Images/
+│   └── dashboard.png
 └── README.md
-    └── Project documentation
